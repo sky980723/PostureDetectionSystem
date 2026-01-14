@@ -191,11 +191,27 @@ async def global_exception_handler(request, exc):
 
 if __name__ == "__main__":
     import uvicorn
+    import sys
 
-    uvicorn.run(
-        "src.api.main:app",
-        host=api_settings.host,
-        port=api_settings.port,
-        reload=api_settings.debug,
-        log_level="debug" if api_settings.debug else "info"
-    )
+    # 检测是否在调试器中运行
+    is_debugging = sys.gettrace() is not None
+
+    if is_debugging:
+        # 调试模式：使用简化配置，避免与PyCharm调试器冲突
+        logger.info(f"🐛 调试模式启动，访问: http://{api_settings.host}:{api_settings.port}")
+        uvicorn.run(
+            app,  # 直接传入app对象，而不是字符串
+            host=api_settings.host,
+            port=api_settings.port,
+            log_level="debug"
+        )
+    else:
+        # 正常模式：使用完整配置
+        logger.info(f"🚀 正常模式启动，访问: http://{api_settings.host}:{api_settings.port}")
+        uvicorn.run(
+            "src.api.main:app",
+            host=api_settings.host,
+            port=api_settings.port,
+            reload=api_settings.debug,
+            log_level="debug" if api_settings.debug else "info"
+        )

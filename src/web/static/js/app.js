@@ -179,9 +179,19 @@ function stopCamera() {
 function connectWebSocket() {
     return new Promise((resolve, reject) => {
         try {
+            console.log('正在连接 WebSocket:', APP_CONFIG.wsUrl);
             appState.ws = new WebSocket(APP_CONFIG.wsUrl);
 
+            // 设置连接超时（5秒）
+            const timeout = setTimeout(() => {
+                if (appState.ws.readyState !== WebSocket.OPEN) {
+                    appState.ws.close();
+                    reject(new Error('WebSocket 连接超时（5秒），请检查网络或服务器状态'));
+                }
+            }, 5000);
+
             appState.ws.onopen = () => {
+                clearTimeout(timeout);
                 console.log('WebSocket 连接成功');
                 updateStatus('good', '已连接');
                 updateOverlay('连接成功，正在检测...', true);
@@ -192,14 +202,17 @@ function connectWebSocket() {
                 handleWebSocketMessage(event.data);
             };
 
-            appState.ws.onerror = (error) => {
-                console.error('WebSocket 错误:', error);
+            appState.ws.onerror = (event) => {
+                clearTimeout(timeout);
+                console.error('WebSocket 错误事件:', event);
                 updateStatus('bad', '连接错误');
-                reject(error);
+                // WebSocket 的 onerror 不提供详细错误信息，需要手动创建
+                reject(new Error('WebSocket 连接失败，请检查服务器是否运行在 ' + APP_CONFIG.wsUrl));
             };
 
-            appState.ws.onclose = () => {
-                console.log('WebSocket 连接已关闭');
+            appState.ws.onclose = (event) => {
+                clearTimeout(timeout);
+                console.log('WebSocket 连接已关闭, code:', event.code, 'reason:', event.reason);
                 updateStatus('bad', '未连接');
                 if (appState.isMonitoring) {
                     stopMonitoring();
@@ -208,7 +221,7 @@ function connectWebSocket() {
             };
         } catch (error) {
             console.error('WebSocket 创建失败:', error);
-            reject(error);
+            reject(new Error('无法创建 WebSocket 连接: ' + error.message));
         }
     });
 }
@@ -547,16 +560,21 @@ async function startMonitoring() {
     }
 
     try {
+        console.log('开始启动监测...');
+
         // 1. 初始化摄像头
+        console.log('步骤1: 初始化摄像头...');
         const cameraOk = await initCamera();
         if (!cameraOk) {
-            return;
+            throw new Error('摄像头初始化失败，请检查摄像头权限或设备连接');
         }
 
         // 2. 连接WebSocket
+        console.log('步骤2: 连接 WebSocket...');
         await connectWebSocket();
 
         // 3. 开始发送帧
+        console.log('步骤3: 开始发送视频帧...');
         const frameDelay = 1000 / APP_CONFIG.frameRate;
         appState.frameInterval = setInterval(sendFrame, frameDelay);
 
@@ -569,11 +587,17 @@ async function startMonitoring() {
         elements.startBtn.disabled = true;
         elements.stopBtn.disabled = false;
 
-        console.log('监测已开始');
+        console.log('✅ 监测已成功启动');
     } catch (error) {
-        console.error('启动监测失败:', error);
+        console.error('❌ 启动监测失败:', error);
         stopMonitoring();
-        alert(`启动监测失败: ${error.message}`);
+
+        // 确保错误信息有意义
+        const errorMessage = error && error.message
+            ? error.message
+            : '未知错误，请查看浏览器控制台获取详细信息';
+
+        alert(`启动监测失败:\n\n${errorMessage}\n\n请确保:\n1. 服务器正在运行\n2. 摄像头权限已授予\n3. 浏览器支持WebSocket和摄像头`);
     }
 }
 

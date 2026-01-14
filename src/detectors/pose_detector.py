@@ -7,7 +7,10 @@
 from typing import Optional, List, Dict, Any
 import numpy as np
 import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 from dataclasses import dataclass
+from pathlib import Path
 
 from config.settings import settings
 
@@ -143,7 +146,7 @@ class PoseDetector:
         初始化姿态检测器
 
         Args:
-            model_complexity: 模型复杂度 (0=轻量, 1=标准, 2=重量)
+            model_complexity: 模型复杂度 (0=轻量, 1=标准, 2=重量) [注：新版API统一使用lite模型]
             min_detection_confidence: 最小检测置信度
             min_tracking_confidence: 最小追踪置信度
         """
@@ -155,20 +158,25 @@ class PoseDetector:
             min_tracking_confidence or settings.min_tracking_confidence
         )
 
-        # 初始化 MediaPipe Pose
-        self.mp_pose = mp.solutions.pose
-        self.pose = self.mp_pose.Pose(
-            model_complexity=self.model_complexity,
-            min_detection_confidence=self.min_detection_confidence,
+        # 初始化 MediaPipe Pose Landmarker（新版 API）
+        model_path = Path(__file__).parent.parent.parent / "models" / "pose_landmarker_lite.task"
+
+        base_options = python.BaseOptions(model_asset_path=str(model_path))
+        options = vision.PoseLandmarkerOptions(
+            base_options=base_options,
+            running_mode=vision.RunningMode.IMAGE,
+            min_pose_detection_confidence=self.min_detection_confidence,
             min_tracking_confidence=self.min_tracking_confidence
         )
+
+        self.landmarker = vision.PoseLandmarker.create_from_options(options)
 
     def detect(self, image: np.ndarray) -> PoseResult:
         """
         检测图像中的人体姿态
 
         Args:
-            image: 输入图像 (BGR 格式, OpenCV 标准)
+            image: 输入图像 (RGB 格式)
 
         Returns:
             PoseResult 对象,包含 33 个关键点数据
@@ -180,17 +188,18 @@ class PoseDetector:
             raise ValueError("输入必须是 numpy.ndarray 类型")
 
         if len(image.shape) != 3 or image.shape[2] != 3:
-            raise ValueError(f"输入图像必须是 3 通道 BGR 图像, 当前形状: {image.shape}")
+            raise ValueError(f"输入图像必须是 3 通道图像, 当前形状: {image.shape}")
 
-        # MediaPipe 使用 RGB 格式
-        image_rgb = self._bgr_to_rgb(image)
+        # 转换为 MediaPipe Image 对象
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image)
 
         # 执行检测
-        results = self.pose.process(image_rgb)
+        detection_result = self.landmarker.detect(mp_image)
 
         # 解析结果
-        if results.pose_landmarks:
-            landmarks = self._parse_landmarks(results.pose_landmarks.landmark)
+        if detection_result.pose_landmarks and len(detection_result.pose_landmarks) > 0:
+            # 取第一个检测到的人体（通常只有一个）
+            landmarks = self._parse_landmarks(detection_result.pose_landmarks[0])
             return PoseResult(landmarks=landmarks, detected=True)
         else:
             # 未检测到人体,返回空的关键点列表
@@ -232,8 +241,8 @@ class PoseDetector:
 
     def close(self):
         """释放资源"""
-        if hasattr(self, 'pose'):
-            self.pose.close()
+        if hasattr(self, 'landmarker'):
+            self.landmarker.close()
 
     def __enter__(self):
         """上下文管理器入口"""
