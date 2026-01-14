@@ -89,8 +89,11 @@ function initElements() {
         monitorTime: document.getElementById('monitorTime'),
         goodTime: document.getElementById('goodTime'),
 
-        // 历史图表
-        historyChart: document.getElementById('historyChart'),
+        // 本周统计
+        weeklyGoodCount: document.getElementById('goodCount'),
+        weeklyWarningCount: document.getElementById('warningCount'),
+        weeklyBadCount: document.getElementById('badCount'),
+        weeklyTotalRecords: document.getElementById('totalRecords'),
 
         // 设置
         settingsBtn: document.getElementById('settingsBtn'),
@@ -416,6 +419,9 @@ function handleAlert(alert) {
     if (alert.sound_alert) {
         playAlertSound(alert.sound_alert);
     }
+
+    // 提醒后刷新本周统计（因为数据库新增了记录）
+    loadWeeklyStats();
 }
 
 function showAlertPopup(popupData) {
@@ -514,39 +520,50 @@ async function loadTodayStatistics() {
     }
 }
 
-async function loadHistoryChart() {
+async function loadWeeklyStats() {
     try {
-        const response = await fetch(`${APP_CONFIG.apiUrl}/statistics?period=week`);
+        console.log('📊 正在加载本周统计数据...');
+        const url = `${APP_CONFIG.apiUrl}/statistics?period=week`;
+        console.log('请求URL:', url);
+
+        const response = await fetch(url);
+        console.log('响应状态:', response.status);
 
         if (response.ok) {
             const data = await response.json();
-            drawHistoryChart(data);
+            console.log('📊 本周统计数据返回:', data);
+            displayWeeklyStats(data);
+        } else {
+            console.error('❌ API响应失败:', response.status, response.statusText);
         }
     } catch (error) {
-        console.error('加载历史数据失败:', error);
+        console.error('❌ 加载本周统计失败:', error);
     }
 }
 
-function drawHistoryChart(data) {
-    const canvas = elements.historyChart;
-    const ctx = canvas.getContext('2d');
-    const width = canvas.width;
-    const height = canvas.height;
+function displayWeeklyStats(data) {
+    console.log('📊 开始显示本周统计...');
+    const distribution = data.posture_distribution || {};
+    console.log('姿态分布:', distribution);
 
-    // 清空画布
-    ctx.clearRect(0, 0, width, height);
+    // 检查DOM元素是否存在
+    if (!elements.weeklyGoodCount) {
+        console.error('❌ 找不到 weeklyGoodCount 元素');
+        return;
+    }
 
-    // 简单的柱状图示例（实际应根据数据绘制）
-    ctx.fillStyle = '#4CAF50';
-    ctx.fillRect(50, 150, 40, 50);
+    // 更新各项数字
+    const goodCount = distribution.good || 0;
+    const warningCount = distribution.warning || 0;
+    const badCount = distribution.bad || 0;
+    const totalRecords = data.total_records || 0;
 
-    ctx.fillStyle = '#FFC107';
-    ctx.fillRect(120, 120, 40, 80);
+    elements.weeklyGoodCount.textContent = goodCount;
+    elements.weeklyWarningCount.textContent = warningCount;
+    elements.weeklyBadCount.textContent = badCount;
+    elements.weeklyTotalRecords.textContent = totalRecords;
 
-    ctx.fillStyle = '#f44336';
-    ctx.fillRect(190, 140, 40, 60);
-
-    console.log('历史图表已绘制:', data);
+    console.log(`✅ 本周统计已更新: 良好=${goodCount}, 欠佳=${warningCount}, 不良=${badCount}, 总计=${totalRecords}`);
 }
 
 // ============================================================================
@@ -790,21 +807,31 @@ function bindEvents() {
 // ============================================================================
 
 async function initApp() {
-    console.log('坐姿监测系统初始化...');
+    console.log('🚀 坐姿监测系统初始化...');
 
     // 初始化DOM元素
     initElements();
+    console.log('✅ DOM元素初始化完成');
 
     // 绑定事件
     bindEvents();
+    console.log('✅ 事件绑定完成');
 
     // 加载今日统计
+    console.log('📊 加载今日统计...');
     await loadTodayStatistics();
 
-    // 加载历史图表
-    await loadHistoryChart();
+    // 加载本周统计
+    console.log('📊 加载本周统计...');
+    await loadWeeklyStats();
 
-    console.log('系统初始化完成');
+    // 定期刷新本周统计（每5分钟）
+    setInterval(() => {
+        console.log('⏰ 定时刷新本周统计...');
+        loadWeeklyStats();
+    }, 5 * 60 * 1000);
+
+    console.log('✅ 系统初始化完成');
 }
 
 // 页面加载完成后初始化

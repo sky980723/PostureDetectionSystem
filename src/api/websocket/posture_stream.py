@@ -44,7 +44,8 @@ class PostureStreamHandler:
         websocket: WebSocket,
         pose_detector: PoseDetector,
         posture_analyzer: PostureAnalyzer,
-        alert_manager: AlertManager
+        alert_manager: AlertManager,
+        record_service=None
     ):
         """
         初始化处理器
@@ -54,11 +55,13 @@ class PostureStreamHandler:
             pose_detector: 姿态检测器
             posture_analyzer: 坐姿分析器
             alert_manager: 提醒管理器
+            record_service: 记录服务（可选）
         """
         self.websocket = websocket
         self.pose_detector = pose_detector
         self.posture_analyzer = posture_analyzer
         self.alert_manager = alert_manager
+        self.record_service = record_service
         self.is_connected = False
         self.frame_count = 0
         self.last_process_time = 0.0
@@ -183,12 +186,42 @@ class PostureStreamHandler:
         # 检查是否需要提醒
         alert_result = self.alert_manager.check_and_alert(posture_state)
 
+        # 如果触发告警，保存记录到数据库
+        if alert_result['should_alert'] and self.record_service:
+            try:
+                # 获取最严重的问题类型作为主要姿态类型
+                posture_type = posture_state['issues'][0] if posture_state['issues'] else "unknown"
+
+                # 计算持续时间（假设每次告警间隔30秒的冷却时间）
+                duration = 30.0
+
+                # 计算严重程度（基于问题数量和状态）
+                severity = 0.5 if posture_state['status'] == 'warning' else 0.8
+
+                await self.record_service.create_record(
+                    posture_type=posture_type,
+                    severity=severity,
+                    duration_seconds=duration,
+                    timestamp=datetime.now()
+                )
+                logger.info(f"Alert record saved: {posture_type}, severity={severity}")
+            except Exception as e:
+                logger.error(f"Failed to save alert record: {e}", exc_info=True)
+
+        # 构建分析结果（合并基础字段和前端需要的字段）
+        analysis_dict = analysis_result.to_dict()
+        analysis_dict.update({
+            'status': posture_state['status'],
+            'issues': posture_state['issues'],
+            'angles': posture_state['angles']
+        })
+
         # 构建响应
         return PostureResponse(
             timestamp=datetime.now().isoformat(),
             detected=True,
             pose_landmarks=landmarks,
-            analysis=AnalysisResult(**analysis_result.to_dict()),
+            analysis=AnalysisResult(**analysis_dict),
             alert=AlertData(
                 should_alert=alert_result['should_alert'],
                 sound_alert=alert_result.get('sound_alert'),
@@ -316,7 +349,8 @@ async def handle_posture_websocket(
     websocket: WebSocket,
     pose_detector: PoseDetector,
     posture_analyzer: PostureAnalyzer,
-    alert_manager: AlertManager
+    alert_manager: AlertManager,
+    record_service=None
 ):
     """
     WebSocket 端点处理函数
@@ -326,11 +360,13 @@ async def handle_posture_websocket(
         pose_detector: 姿态检测器
         posture_analyzer: 坐姿分析器
         alert_manager: 提醒管理器
+        record_service: 记录服务（可选）
     """
     handler = PostureStreamHandler(
         websocket=websocket,
         pose_detector=pose_detector,
         posture_analyzer=posture_analyzer,
-        alert_manager=alert_manager
+        alert_manager=alert_manager,
+        record_service=record_service
     )
     await handler.handle_connection()

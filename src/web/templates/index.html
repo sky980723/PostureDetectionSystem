@@ -102,24 +102,25 @@
                     </div>
                 </div>
 
-                <!-- 历史记录图表 -->
+                <!-- 历史记录 -->
                 <div class="card">
-                    <h3>历史记录</h3>
-                    <div class="chart-container">
-                        <canvas id="historyChart" width="300" height="200"></canvas>
-                    </div>
-                    <div class="chart-legend">
-                        <div class="legend-item">
-                            <span class="legend-dot good"></span>
-                            <span>良好</span>
+                    <h3>本周统计</h3>
+                    <div class="stats-display" id="weeklyStats">
+                        <div class="stat-item">
+                            <span class="stat-label">良好次数:</span>
+                            <span class="stat-value good" id="goodCount">0</span>
                         </div>
-                        <div class="legend-item">
-                            <span class="legend-dot warning"></span>
-                            <span>欠佳</span>
+                        <div class="stat-item">
+                            <span class="stat-label">欠佳次数:</span>
+                            <span class="stat-value warning" id="warningCount">0</span>
                         </div>
-                        <div class="legend-item">
-                            <span class="legend-dot bad"></span>
-                            <span>不良</span>
+                        <div class="stat-item">
+                            <span class="stat-label">不良次数:</span>
+                            <span class="stat-value bad" id="badCount">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">总记录数:</span>
+                            <span class="stat-value" id="totalRecords">0</span>
                         </div>
                     </div>
                 </div>

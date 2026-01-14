@@ -56,8 +56,8 @@ async def get_statistics(
             posture_distribution=stats['posture_distribution'],
             avg_severity=stats['avg_severity'],
             total_duration=stats['total_duration'],
-            period_start=stats['period_start'].isoformat(),
-            period_end=stats['period_end'].isoformat()
+            period_start=stats['period_start'],  # 已经是 ISO 格式字符串
+            period_end=stats['period_end']        # 已经是 ISO 格式字符串
         )
 
     except ValueError as e:

@@ -55,6 +55,11 @@ class AnalysisResult(BaseModel):
     crossed_legs_diff: Optional[float] = Field(None, description="腿部偏移差异")
     valid: bool = Field(..., description="分析结果是否有效")
 
+    # 前端期望的 angles 对象（包含所有角度数据）
+    status: str = Field(default="good", description="状态: good/warning/bad")
+    issues: List[str] = Field(default_factory=list, description="问题列表")
+    angles: Dict[str, float] = Field(default_factory=dict, description="角度数据")
+
 
 class AlertData(BaseModel):
     """提醒数据"""

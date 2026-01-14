@@ -351,6 +351,18 @@ body {
     color: var(--color-text);
 }
 
+.stat-value.good {
+    color: var(--color-good);
+}
+
+.stat-value.warning {
+    color: var(--color-warning-status);
+}
+
+.stat-value.bad {
+    color: var(--color-bad);
+}
+
 /* ============================================================================
    图表
    ============================================================================ */

@@ -18,6 +18,7 @@ from src.api.deps import (
     get_pose_detector,
     get_posture_analyzer,
     get_alert_manager,
+    get_db_session,
     cleanup_detector
 )
 from src.api.routes import records, statistics, settings
@@ -117,18 +118,24 @@ async def websocket_posture_endpoint(
     websocket: WebSocket,
     pose_detector = Depends(get_pose_detector),
     posture_analyzer = Depends(get_posture_analyzer),
-    alert_manager = Depends(get_alert_manager)
+    alert_manager = Depends(get_alert_manager),
+    session = Depends(get_db_session)
 ):
     """
     WebSocket 端点：实时姿态检测
 
     接收视频帧，返回姿态分析结果和提醒
     """
+    from src.storage.record_service import RecordService
+
+    record_service = RecordService(session)
+
     await handle_posture_websocket(
         websocket=websocket,
         pose_detector=pose_detector,
         posture_analyzer=posture_analyzer,
-        alert_manager=alert_manager
+        alert_manager=alert_manager,
+        record_service=record_service
     )
 
 

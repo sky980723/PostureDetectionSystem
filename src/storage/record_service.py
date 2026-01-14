@@ -201,8 +201,9 @@ class RecordService:
                 "period_end": end_time.isoformat(),
             }
 
-        # 计算姿态分布
+        # 计算姿态分布和状态分布
         posture_distribution: Dict[str, int] = {}
+        status_distribution: Dict[str, int] = {"good": 0, "warning": 0, "bad": 0}
         total_severity = 0.0
         total_duration = 0.0
 
@@ -211,6 +212,16 @@ class RecordService:
             posture_distribution[record.posture_type] = (
                 posture_distribution.get(record.posture_type, 0) + 1
             )
+
+            # 根据严重程度映射到状态
+            # 0.0-0.3: good, 0.3-0.7: warning, 0.7-1.0: bad
+            if record.severity < 0.3:
+                status_distribution["good"] += 1
+            elif record.severity < 0.7:
+                status_distribution["warning"] += 1
+            else:
+                status_distribution["bad"] += 1
+
             # 累加严重程度
             total_severity += record.severity
             # 累加持续时间
@@ -219,9 +230,10 @@ class RecordService:
         # 计算平均严重程度
         avg_severity = total_severity / total_records
 
+        # 返回status分布而不是posture分布（匹配前端需求）
         return {
             "total_records": total_records,
-            "posture_distribution": posture_distribution,
+            "posture_distribution": status_distribution,  # 前端需要按status统计
             "avg_severity": round(avg_severity, 3),
             "total_duration": round(total_duration, 2),
             "period_start": start_time.isoformat(),
