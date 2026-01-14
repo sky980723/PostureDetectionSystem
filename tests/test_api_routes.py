@@ -409,8 +409,17 @@ def test_health_check(client):
 
 
 def test_root_endpoint(client):
-    """测试根路径端点"""
+    """测试根路径端点（返回HTML主页）"""
     response = client.get("/")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "坐姿监测系统" in response.text
+
+
+def test_api_info_endpoint(client):
+    """测试API信息端点"""
+    response = client.get("/api")
 
     assert response.status_code == 200
     data = response.json()

@@ -5,11 +5,14 @@ FastAPI 主应用
 """
 
 import logging
+from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, Depends
+from fastapi import FastAPI, WebSocket, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 from src.api.deps import (
     get_pose_detector,
@@ -28,6 +31,14 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# 获取项目根目录
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+TEMPLATES_DIR = BASE_DIR / "src" / "web" / "templates"
+STATIC_DIR = BASE_DIR / "src" / "web" / "static"
+
+# 配置模板
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 # ============================================================================
@@ -69,6 +80,9 @@ app = FastAPI(
     debug=api_settings.debug,
     lifespan=lifespan
 )
+
+# 挂载静态文件
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 # ============================================================================
@@ -122,9 +136,15 @@ async def websocket_posture_endpoint(
 # 根路径和健康检查
 # ============================================================================
 
-@app.get("/")
-async def root():
-    """根路径 - API 信息"""
+@app.get("/", response_class=HTMLResponse)
+async def root(request: Request):
+    """根路径 - 返回主页面"""
+    return templates.TemplateResponse(request=request, name="index.html")
+
+
+@app.get("/api")
+async def api_info():
+    """API 信息"""
     return {
         "name": api_settings.app_name,
         "version": api_settings.app_version,
