@@ -30,9 +30,18 @@ class VideoFrameRequest(BaseModel):
         """验证 base64 数据格式"""
         if not v or len(v) < 10:
             raise ValueError("Invalid base64 image data")
-        # 检查是否包含 base64 前缀
-        if not v.startswith('data:image/'):
-            raise ValueError("Image data must start with 'data:image/'")
+
+        # 允许两种格式：
+        # 1. 完整的 Data URL: data:image/jpeg;base64,/9j/4AAQ...
+        # 2. 纯 base64 数据: /9j/4AAQ...
+        # 前端发送的是纯 base64（已移除前缀），这样可以减少传输量
+
+        # 如果是纯 base64，无需额外验证
+        # 如果有前缀，确保格式正确
+        if v.startswith('data:'):
+            if not v.startswith('data:image/'):
+                raise ValueError("Image data URL must start with 'data:image/'")
+
         return v
 
 
