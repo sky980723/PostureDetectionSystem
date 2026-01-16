@@ -7,7 +7,7 @@ PostureRecord 数据模型
 from datetime import datetime
 from typing import Literal
 
-from sqlalchemy import Float, Integer, String, DateTime
+from sqlalchemy import Float, Integer, String, DateTime, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.models.database import Base
@@ -55,6 +55,12 @@ class PostureRecord(Base):
         nullable=False,
     )
 
+    # 姿态关键点（JSON 字符串，可选）
+    pose_landmarks: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
     def __repr__(self) -> str:
         """字符串表示"""
         return (
@@ -78,6 +84,7 @@ class PostureRecord(Base):
             "posture_type": self.posture_type,
             "severity": self.severity,
             "duration_seconds": self.duration_seconds,
+            "pose_landmarks": self.pose_landmarks,
         }
 
     @classmethod

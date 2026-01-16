@@ -47,7 +47,7 @@ class PoseResult:
     姿态检测结果数据类
 
     Attributes:
-        landmarks: 33 个关键点列表 (MediaPipe Pose 标准)
+        landmarks: 17 个关键点列表 (COCO 标准)
         detected: 是否成功检测到人体
     """
     landmarks: List[Landmark]
@@ -58,7 +58,7 @@ class PoseResult:
         获取指定索引的关键点
 
         Args:
-            index: 关键点索引 (0-32)
+            index: 关键点索引 (0-16)
 
         Returns:
             关键点对象,如果索引无效则返回 None
@@ -90,73 +90,36 @@ class PoseDetector:
     """
     人体姿态检测器
 
-    封装 YOLOv8-Pose 模型,输出 MediaPipe 33 关键点兼容格式
+    封装 YOLOv8-Pose 模型,输出 COCO 17 关键点格式
 
-    MediaPipe 关键点索引:
+    COCO 关键点索引:
         0: 鼻子 (nose)
-        11-12: 肩膀 (left_shoulder, right_shoulder)
-        23-24: 髋部 (left_hip, right_hip)
-        25-26: 膝盖 (left_knee, right_knee)
-        27-28: 脚踝 (left_ankle, right_ankle)
-        详见: https://google.github.io/mediapipe/solutions/pose.html
+        5-6: 肩膀 (left_shoulder, right_shoulder)
+        11-12: 髋部 (left_hip, right_hip)
+        13-14: 膝盖 (left_knee, right_knee)
+        15-16: 脚踝 (left_ankle, right_ankle)
     """
 
-    # MediaPipe Pose 关键点索引常量
+    # COCO 关键点索引常量
     NOSE = 0
-    LEFT_EYE_INNER = 1
-    LEFT_EYE = 2
-    LEFT_EYE_OUTER = 3
-    RIGHT_EYE_INNER = 4
-    RIGHT_EYE = 5
-    RIGHT_EYE_OUTER = 6
-    LEFT_EAR = 7
-    RIGHT_EAR = 8
-    MOUTH_LEFT = 9
-    MOUTH_RIGHT = 10
-    LEFT_SHOULDER = 11
-    RIGHT_SHOULDER = 12
-    LEFT_ELBOW = 13
-    RIGHT_ELBOW = 14
-    LEFT_WRIST = 15
-    RIGHT_WRIST = 16
-    LEFT_PINKY = 17
-    RIGHT_PINKY = 18
-    LEFT_INDEX = 19
-    RIGHT_INDEX = 20
-    LEFT_THUMB = 21
-    RIGHT_THUMB = 22
-    LEFT_HIP = 23
-    RIGHT_HIP = 24
-    LEFT_KNEE = 25
-    RIGHT_KNEE = 26
-    LEFT_ANKLE = 27
-    RIGHT_ANKLE = 28
-    LEFT_HEEL = 29
-    RIGHT_HEEL = 30
-    LEFT_FOOT_INDEX = 31
-    RIGHT_FOOT_INDEX = 32
+    LEFT_EYE = 1
+    RIGHT_EYE = 2
+    LEFT_EAR = 3
+    RIGHT_EAR = 4
+    LEFT_SHOULDER = 5
+    RIGHT_SHOULDER = 6
+    LEFT_ELBOW = 7
+    RIGHT_ELBOW = 8
+    LEFT_WRIST = 9
+    RIGHT_WRIST = 10
+    LEFT_HIP = 11
+    RIGHT_HIP = 12
+    LEFT_KNEE = 13
+    RIGHT_KNEE = 14
+    LEFT_ANKLE = 15
+    RIGHT_ANKLE = 16
 
-    _MEDIAPIPE_KEYPOINT_COUNT = 33
     _COCO_KEYPOINT_COUNT = 17
-    _MEDIAPIPE_TO_COCO = {
-        NOSE: 0,
-        LEFT_EYE: 1,
-        RIGHT_EYE: 2,
-        LEFT_EAR: 3,
-        RIGHT_EAR: 4,
-        LEFT_SHOULDER: 5,
-        RIGHT_SHOULDER: 6,
-        LEFT_ELBOW: 7,
-        RIGHT_ELBOW: 8,
-        LEFT_WRIST: 9,
-        RIGHT_WRIST: 10,
-        LEFT_HIP: 11,
-        RIGHT_HIP: 12,
-        LEFT_KNEE: 13,
-        RIGHT_KNEE: 14,
-        LEFT_ANKLE: 15,
-        RIGHT_ANKLE: 16
-    }
 
     def __init__(
         self,
@@ -192,7 +155,7 @@ class PoseDetector:
             image: 输入图像 (RGB 格式)
 
         Returns:
-            PoseResult 对象,包含 33 个关键点数据
+            PoseResult 对象,包含 17 个关键点数据
 
         Raises:
             ValueError: 输入图像格式无效
@@ -226,7 +189,7 @@ class PoseDetector:
         keypoints_xy = keypoints_xy[best_index]
         keypoints_conf = keypoints_conf[best_index]
 
-        landmarks = self._map_to_mediapipe(keypoints_xy, keypoints_conf)
+        landmarks = self._build_landmarks(keypoints_xy, keypoints_conf)
         return PoseResult(landmarks=landmarks, detected=True)
 
     def _extract_keypoints(
@@ -299,24 +262,28 @@ class PoseDetector:
         scores = keypoints_conf.mean(axis=1)
         return int(np.argmax(scores))
 
-    def _map_to_mediapipe(
+    def _build_landmarks(
         self,
         keypoints_xy: np.ndarray,
         keypoints_conf: np.ndarray
     ) -> List[Landmark]:
+        if keypoints_xy.ndim != 2:
+            keypoints_xy = np.asarray(keypoints_xy).reshape(-1, 2)
+        if keypoints_conf.ndim > 1:
+            keypoints_conf = keypoints_conf.reshape(-1)
+
         landmarks = [
             Landmark(x=0.0, y=0.0, z=0.0, visibility=0.0)
-            for _ in range(self._MEDIAPIPE_KEYPOINT_COUNT)
+            for _ in range(self._COCO_KEYPOINT_COUNT)
         ]
 
-        for mediapipe_index, coco_index in self._MEDIAPIPE_TO_COCO.items():
-            if coco_index >= keypoints_xy.shape[0]:
-                continue
-            x, y = keypoints_xy[coco_index]
+        available_count = min(self._COCO_KEYPOINT_COUNT, keypoints_xy.shape[0])
+        for keypoint_index in range(available_count):
+            x, y = keypoints_xy[keypoint_index]
             visibility = 0.0
-            if coco_index < keypoints_conf.shape[0]:
-                visibility = float(keypoints_conf[coco_index])
-            landmarks[mediapipe_index] = Landmark(
+            if keypoint_index < keypoints_conf.shape[0]:
+                visibility = float(keypoints_conf[keypoint_index])
+            landmarks[keypoint_index] = Landmark(
                 x=float(x),
                 y=float(y),
                 z=0.0,

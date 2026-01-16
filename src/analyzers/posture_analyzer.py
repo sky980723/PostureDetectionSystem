@@ -21,9 +21,9 @@ class PostureAnalysisResult:
         head_forward: 是否头部前倾
         head_forward_angle: 头部前倾角度(度)
         hunchback: 是否驼背
-        hunchback_offset: 驼背偏移量(归一化)
+        hunchback_offset: 驼背偏移角度(度)
         crossed_legs: 是否跷二郎腿
-        crossed_legs_diff: 腿部横向偏移差异(归一化)
+        crossed_legs_diff: 腿部角度差异(度)
         valid: 分析结果是否有效(所需关键点是否可见)
     """
     head_forward: bool
@@ -51,10 +51,10 @@ class PostureAnalyzer:
     """
     坐姿分析器
 
-    基于 MediaPipe Pose 检测的关键点,分析三种不良坐姿:
-    1. 头部前倾: 计算耳-肩-髋连线角度
-    2. 驼背: 计算肩膀相对髋部的 Y 坐标偏移
-    3. 跷二郎腿: 比较膝盖和脚踝的 X 坐标差异
+    基于 YOLO COCO 17 关键点,分析三种不良坐姿:
+    1. 头部前倾: nose-neck-torso 夹角
+    2. 驼背: shoulder_mid->hip_mid 向量与垂直线的偏移角
+    3. 跷二郎腿: 膝盖-脚踝向量的角度差 + 跨中线判断
     """
 
     def __init__(
@@ -68,8 +68,8 @@ class PostureAnalyzer:
 
         Args:
             head_forward_threshold: 头部前倾角度阈值(度)
-            hunchback_threshold: 驼背偏移量阈值
-            crossed_legs_threshold: 跷二郎腿 X 坐标差异阈值
+            hunchback_threshold: 驼背偏移角度阈值(度)
+            crossed_legs_threshold: 跷二郎腿角度差阈值(度)
         """
         self.head_forward_threshold = (
             head_forward_threshold or settings.head_forward_angle_threshold
@@ -121,8 +121,8 @@ class PostureAnalyzer:
         检测头部前倾
 
         算法:
-        1. 获取耳朵、肩膀、髋部的关键点坐标
-        2. 计算耳-肩向量与肩-髋向量的夹角
+        1. 计算虚拟 neck 点(肩膀中点)与 torso 点(髋部中点)
+        2. 计算 nose->neck 与 neck->torso 的夹角
         3. 当夹角超过阈值时判定为前倾
 
         Args:
@@ -131,25 +131,24 @@ class PostureAnalyzer:
         Returns:
             (是否前倾, 前倾角度) 元组
         """
-        # 使用左侧关键点(右侧对称)
-        ear = pose_result.get_landmark(PoseDetector.LEFT_EAR)
-        shoulder = pose_result.get_landmark(PoseDetector.LEFT_SHOULDER)
-        hip = pose_result.get_landmark(PoseDetector.LEFT_HIP)
-
-        # 检查关键点可见性
-        if not all([
-            pose_result.is_landmark_visible(PoseDetector.LEFT_EAR),
-            pose_result.is_landmark_visible(PoseDetector.LEFT_SHOULDER),
-            pose_result.is_landmark_visible(PoseDetector.LEFT_HIP)
-        ]):
+        indices = [
+            PoseDetector.NOSE,
+            PoseDetector.LEFT_SHOULDER,
+            PoseDetector.RIGHT_SHOULDER,
+            PoseDetector.LEFT_HIP,
+            PoseDetector.RIGHT_HIP
+        ]
+        landmarks = self._get_visible_landmarks(pose_result, indices)
+        if landmarks is None:
             return False, None
 
-        # 计算向量
-        ear_to_shoulder = self._vector(ear, shoulder)
-        shoulder_to_hip = self._vector(shoulder, hip)
+        nose, left_shoulder, right_shoulder, left_hip, right_hip = landmarks
+        neck = self._midpoint(left_shoulder, right_shoulder)
+        torso = self._midpoint(left_hip, right_hip)
 
-        # 计算夹角
-        angle = self._angle_between_vectors(ear_to_shoulder, shoulder_to_hip)
+        nose_to_neck = self._vector(nose, neck)
+        neck_to_torso = self._vector(neck, torso)
+        angle = self._angle_between_vectors(nose_to_neck, neck_to_torso)
 
         # 判断是否前倾
         is_forward = angle > self.head_forward_threshold
@@ -161,85 +160,124 @@ class PostureAnalyzer:
         检测驼背
 
         算法:
-        1. 计算左右肩膀的平均 Y 坐标
-        2. 计算左右髋部的平均 Y 坐标
-        3. 计算肩膀相对髋部的归一化偏移量
-        4. 当偏移量小于阈值(肩膀下移)时判定为驼背
+        1. 计算肩膀中点与髋部中点
+        2. 计算 shoulder_mid->hip_mid 与垂直向量夹角
+        3. 当偏移角超过阈值时判定为驼背
 
         Args:
             pose_result: 姿态检测结果
 
         Returns:
-            (是否驼背, 偏移量) 元组
+            (是否驼背, 偏移角度) 元组
         """
-        left_shoulder = pose_result.get_landmark(PoseDetector.LEFT_SHOULDER)
-        right_shoulder = pose_result.get_landmark(PoseDetector.RIGHT_SHOULDER)
-        left_hip = pose_result.get_landmark(PoseDetector.LEFT_HIP)
-        right_hip = pose_result.get_landmark(PoseDetector.RIGHT_HIP)
-
-        # 检查关键点可见性
-        if not all([
-            pose_result.is_landmark_visible(PoseDetector.LEFT_SHOULDER),
-            pose_result.is_landmark_visible(PoseDetector.RIGHT_SHOULDER),
-            pose_result.is_landmark_visible(PoseDetector.LEFT_HIP),
-            pose_result.is_landmark_visible(PoseDetector.RIGHT_HIP)
-        ]):
+        indices = [
+            PoseDetector.LEFT_SHOULDER,
+            PoseDetector.RIGHT_SHOULDER,
+            PoseDetector.LEFT_HIP,
+            PoseDetector.RIGHT_HIP
+        ]
+        landmarks = self._get_visible_landmarks(pose_result, indices)
+        if landmarks is None:
             return False, None
 
-        # 计算平均坐标
-        shoulder_y = (left_shoulder.y + right_shoulder.y) / 2
-        hip_y = (left_hip.y + right_hip.y) / 2
+        left_shoulder, right_shoulder, left_hip, right_hip = landmarks
+        shoulder_mid = self._midpoint(left_shoulder, right_shoulder)
+        hip_mid = self._midpoint(left_hip, right_hip)
 
-        # 计算相对偏移(正常情况下肩膀应高于髋部,Y 坐标更小)
-        # 驼背时肩膀下移,偏移量变小
-        offset = hip_y - shoulder_y
+        spine_vector = self._vector(shoulder_mid, hip_mid)
+        vertical_vector = (0.0, 1.0)
+        angle = self._angle_between_vectors(spine_vector, vertical_vector)
 
-        # 判断是否驼背
-        is_hunchback = offset < self.hunchback_threshold
+        is_hunchback = angle > self.hunchback_threshold
 
-        return is_hunchback, offset
+        return is_hunchback, angle
 
     def check_crossed_legs(self, pose_result: PoseResult) -> tuple[bool, Optional[float]]:
         """
         检测跷二郎腿
 
         算法:
-        1. 获取左右膝盖和脚踝的 X 坐标
-        2. 计算左右膝盖的 X 坐标差异
-        3. 计算左右脚踝的 X 坐标差异
-        4. 当膝盖或脚踝的横向偏移超过阈值时判定为跷二郎腿
+        1. 计算膝盖->脚踝向量与垂直线夹角
+        2. 计算左右腿角度差异
+        3. 检测是否跨越身体中线
+        4. 当角度差超过阈值且跨中线时判定为跷二郎腿
 
         Args:
             pose_result: 姿态检测结果
 
         Returns:
-            (是否跷二郎腿, 最大偏移差异) 元组
+            (是否跷二郎腿, 角度差异) 元组
         """
-        left_knee = pose_result.get_landmark(PoseDetector.LEFT_KNEE)
-        right_knee = pose_result.get_landmark(PoseDetector.RIGHT_KNEE)
-        left_ankle = pose_result.get_landmark(PoseDetector.LEFT_ANKLE)
-        right_ankle = pose_result.get_landmark(PoseDetector.RIGHT_ANKLE)
-
-        # 检查关键点可见性
-        if not all([
-            pose_result.is_landmark_visible(PoseDetector.LEFT_KNEE),
-            pose_result.is_landmark_visible(PoseDetector.RIGHT_KNEE),
-            pose_result.is_landmark_visible(PoseDetector.LEFT_ANKLE),
-            pose_result.is_landmark_visible(PoseDetector.RIGHT_ANKLE)
-        ]):
+        indices = [
+            PoseDetector.LEFT_HIP,
+            PoseDetector.RIGHT_HIP,
+            PoseDetector.LEFT_KNEE,
+            PoseDetector.RIGHT_KNEE,
+            PoseDetector.LEFT_ANKLE,
+            PoseDetector.RIGHT_ANKLE
+        ]
+        landmarks = self._get_visible_landmarks(pose_result, indices)
+        if landmarks is None:
             return False, None
 
-        # 计算横向偏移差异
-        knee_diff = abs(left_knee.x - right_knee.x)
-        ankle_diff = abs(left_ankle.x - right_ankle.x)
+        left_hip, right_hip, left_knee, right_knee, left_ankle, right_ankle = landmarks
+        hip_mid = self._midpoint(left_hip, right_hip)
+        vertical_vector = (0.0, 1.0)
 
-        # 取最大偏移
-        max_diff = max(knee_diff, ankle_diff)
+        left_vector = self._vector(left_knee, left_ankle)
+        right_vector = self._vector(right_knee, right_ankle)
+        left_angle = self._angle_between_vectors(left_vector, vertical_vector)
+        right_angle = self._angle_between_vectors(right_vector, vertical_vector)
+        angle_diff = abs(left_angle - right_angle)
 
-        # 判断是否跷二郎腿
-        is_crossed = max_diff > self.crossed_legs_threshold
+        left_crosses = left_knee.x > hip_mid.x or left_ankle.x > hip_mid.x
+        right_crosses = right_knee.x < hip_mid.x or right_ankle.x < hip_mid.x
+        crosses_midline = left_crosses or right_crosses
 
-        return is_crossed, max_diff
+        is_crossed = crosses_midline and angle_diff > self.crossed_legs_threshold
+
+        return is_crossed, angle_diff
+
+    def _get_visible_landmarks(
+        self,
+        pose_result: PoseResult,
+        indices: list[int]
+    ) -> Optional[list[Landmark]]:
+        """
+        获取可见的关键点列表
+
+        Args:
+            pose_result: 姿态检测结果
+            indices: 关键点索引列表
+
+        Returns:
+            关键点列表,若任意关键点不可见则返回 None
+        """
+        landmarks: list[Landmark] = []
+        for index in indices:
+            landmark = pose_result.get_landmark(index)
+            if landmark is None or not pose_result.is_landmark_visible(index):
+                return None
+            landmarks.append(landmark)
+        return landmarks
+
+    def _midpoint(self, point1: Landmark, point2: Landmark) -> Landmark:
+        """
+        计算两个关键点的中点
+
+        Args:
+            point1: 第一个关键点
+            point2: 第二个关键点
+
+        Returns:
+            中点 Landmark
+        """
+        return Landmark(
+            x=(point1.x + point2.x) / 2,
+            y=(point1.y + point2.y) / 2,
+            z=(point1.z + point2.z) / 2,
+            visibility=min(point1.visibility, point2.visibility)
+        )
 
     def _vector(self, point1: Landmark, point2: Landmark) -> tuple[float, float]:
         """

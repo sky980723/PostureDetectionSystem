@@ -17,8 +17,10 @@ from io import BytesIO
 
 from src.api.main import app
 from src.api.deps import get_pose_detector, get_posture_analyzer, get_alert_manager, get_db_session
-from src.detectors.pose_detector import PoseResult, Landmark
+from src.detectors.pose_detector import PoseResult, Landmark, PoseDetector
 from src.analyzers.posture_analyzer import PostureAnalysisResult
+
+COCO_KEYPOINT_COUNT = PoseDetector._COCO_KEYPOINT_COUNT
 
 
 # ============================================================================
@@ -42,11 +44,11 @@ def create_mock_pose_result(detected=True, visibilities=None) -> PoseResult:
         return PoseResult(landmarks=[], detected=False)
 
     if visibilities is None:
-        visibilities = [0.9 for _ in range(33)]
-    elif len(visibilities) != 33:
-        raise ValueError("visibilities must contain 33 values")
+        visibilities = [0.9 for _ in range(COCO_KEYPOINT_COUNT)]
+    elif len(visibilities) != COCO_KEYPOINT_COUNT:
+        raise ValueError(f"visibilities must contain {COCO_KEYPOINT_COUNT} values")
 
-    # 创建 33 个模拟关键点
+    # 创建 17 个模拟关键点
     landmarks = [
         Landmark(x=0.5, y=0.5, z=0.0, visibility=visibility)
         for visibility in visibilities
@@ -216,14 +218,14 @@ async def test_websocket_posture_detection_success(client, mock_pose_detector, m
         # 验证检测成功
         assert response["detected"] is True
         assert response["pose_landmarks"] is not None
-        assert len(response["pose_landmarks"]) == 33
+        assert len(response["pose_landmarks"]) == COCO_KEYPOINT_COUNT
         assert response["analysis"] is not None
 
 
 @pytest.mark.asyncio
 async def test_websocket_confidence_ignores_zero_visibility(client, mock_pose_detector, mock_posture_analyzer):
     """测试置信度忽略 visibility 为 0 的关键点"""
-    visibilities = [0.2] * 5 + [0.8] * 5 + [0.0] * 23
+    visibilities = [0.2] * 5 + [0.8] * 5 + [0.0] * 7
     mock_pose_detector.detect.return_value = create_mock_pose_result(
         detected=True,
         visibilities=visibilities
@@ -406,7 +408,7 @@ def test_posture_response_schema():
         detected=True,
         pose_landmarks=[
             LandmarkSchema(x=0.5, y=0.5, z=0.0, visibility=0.9)
-            for _ in range(33)
+            for _ in range(COCO_KEYPOINT_COUNT)
         ],
         analysis=None,
         alert=None,
@@ -415,17 +417,17 @@ def test_posture_response_schema():
     )
 
     assert response.detected is True
-    assert len(response.pose_landmarks) == 33
+    assert len(response.pose_landmarks) == COCO_KEYPOINT_COUNT
     assert response.confidence == 0.95
 
-    # 无效数据：关键点数量不为 33
+    # 无效数据：关键点数量不为 17
     with pytest.raises(ValidationError):
         PostureResponse(
             timestamp="2026-01-14T12:00:00",
             detected=True,
             pose_landmarks=[
                 LandmarkSchema(x=0.5, y=0.5, z=0.0, visibility=0.9)
-                for _ in range(32)
+                for _ in range(COCO_KEYPOINT_COUNT - 1)
             ],
             analysis=None,
             alert=None,

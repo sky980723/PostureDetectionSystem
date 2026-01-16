@@ -80,7 +80,7 @@ class PostureResponse(BaseModel):
     type: str = Field(default="posture_result", description="消息类型")
     timestamp: str = Field(..., description="服务器时间戳 (ISO8601)")
     detected: bool = Field(..., description="是否检测到人体")
-    pose_landmarks: Optional[List[LandmarkSchema]] = Field(None, description="33个关键点")
+    pose_landmarks: Optional[List[LandmarkSchema]] = Field(None, description="17个关键点")
     analysis: Optional[AnalysisResult] = Field(None, description="姿态分析结果")
     alert: Optional[AlertData] = Field(None, description="提醒数据")
     status_indicator: Optional[StatusIndicator] = Field(None, description="状态指示器")
@@ -92,8 +92,8 @@ class PostureResponse(BaseModel):
         """验证关键点数量"""
         if v is None:
             return v
-        if len(v) != 33:
-            raise ValueError("pose_landmarks must contain 33 landmarks")
+        if len(v) != 17:
+            raise ValueError("pose_landmarks must contain 17 landmarks")
         return v
 
 

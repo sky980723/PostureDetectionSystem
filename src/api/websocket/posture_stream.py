@@ -252,7 +252,7 @@ class PostureStreamHandler:
             # 使用 PIL 打开图像
             image = Image.open(BytesIO(image_bytes))
 
-            # 转换为 RGB（MediaPipe 需要 RGB）
+            # 转换为 RGB（模型推理需要 RGB）
             if image.mode != 'RGB':
                 image = image.convert('RGB')
 

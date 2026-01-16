@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch, MagicMock
 from config.settings import settings
 from src.detectors.pose_detector import PoseDetector, PoseResult, Landmark
 
+COCO_KEYPOINT_COUNT = PoseDetector._COCO_KEYPOINT_COUNT
 
 class DummyKeypoints:
     """用于测试的 YOLO Keypoints 替身"""
@@ -59,11 +60,11 @@ class DummyTensor:
 
 def build_dummy_keypoints(person_count: int = 1) -> DummyKeypoints:
     """构建可控的关键点数据"""
-    xyn = np.zeros((person_count, 17, 2), dtype=float)
-    conf = np.zeros((person_count, 17), dtype=float)
+    xyn = np.zeros((person_count, COCO_KEYPOINT_COUNT, 2), dtype=float)
+    conf = np.zeros((person_count, COCO_KEYPOINT_COUNT), dtype=float)
 
     for person_index in range(person_count):
-        for keypoint_index in range(17):
+        for keypoint_index in range(COCO_KEYPOINT_COUNT):
             xyn[person_index, keypoint_index] = [
                 (keypoint_index + person_index) / 100.0,
                 (keypoint_index + person_index + 1) / 100.0
@@ -207,7 +208,7 @@ class TestPoseDetector:
                 PoseDetector(model_path="missing.pt")
 
     def test_detect_with_valid_image_maps_keypoints(self, mock_yolo, monkeypatch):
-        """测试有效图像的关键点映射"""
+        """测试有效图像的关键点输出"""
         _, mock_model = mock_yolo
 
         keypoints = build_dummy_keypoints()
@@ -223,7 +224,7 @@ class TestPoseDetector:
         result = detector.detect(image)
 
         assert result.detected is True
-        assert len(result.landmarks) == 33
+        assert len(result.landmarks) == COCO_KEYPOINT_COUNT
 
         nose = result.landmarks[PoseDetector.NOSE]
         assert nose.x == pytest.approx(0.0)
@@ -235,15 +236,13 @@ class TestPoseDetector:
         assert left_eye.x == pytest.approx(0.01)
         assert left_eye.y == pytest.approx(0.02)
 
+        right_eye = result.landmarks[PoseDetector.RIGHT_EYE]
+        assert right_eye.x == pytest.approx(0.02)
+        assert right_eye.y == pytest.approx(0.03)
+
         right_ankle = result.landmarks[PoseDetector.RIGHT_ANKLE]
         assert right_ankle.x == pytest.approx(0.16)
         assert right_ankle.y == pytest.approx(0.17)
-
-        left_eye_inner = result.landmarks[PoseDetector.LEFT_EYE_INNER]
-        assert left_eye_inner.x == 0.0
-        assert left_eye_inner.y == 0.0
-        assert left_eye_inner.z == 0.0
-        assert left_eye_inner.visibility == 0.0
 
         mock_model.predict.assert_called_once_with(
             image,
@@ -257,8 +256,8 @@ class TestPoseDetector:
         """测试多人体时选取最高置信度"""
         _, mock_model = mock_yolo
 
-        xyn = np.zeros((2, 17, 2), dtype=float)
-        conf = np.zeros((2, 17), dtype=float)
+        xyn = np.zeros((2, COCO_KEYPOINT_COUNT, 2), dtype=float)
+        conf = np.zeros((2, COCO_KEYPOINT_COUNT), dtype=float)
 
         xyn[0, :, 0] = 0.1
         xyn[0, :, 1] = 0.1
@@ -306,13 +305,13 @@ class TestPoseDetector:
         """测试从 data 解析并归一化"""
         detector = PoseDetector(model_path="mock.pt")
 
-        data = np.zeros((1, 17, 3), dtype=float)
+        data = np.zeros((1, COCO_KEYPOINT_COUNT, 3), dtype=float)
         data[0, 0] = [100.0, 50.0, 0.8]
         keypoints = DummyKeypointsData(data=data)
 
         keypoints_xy, keypoints_conf = detector._extract_keypoints(keypoints, (100, 200, 3))
 
-        assert keypoints_xy.shape == (1, 17, 2)
+        assert keypoints_xy.shape == (1, COCO_KEYPOINT_COUNT, 2)
         assert keypoints_xy[0, 0, 0] == pytest.approx(0.5)
         assert keypoints_xy[0, 0, 1] == pytest.approx(0.5)
         assert keypoints_conf[0, 0] == pytest.approx(0.8)
@@ -321,29 +320,37 @@ class TestPoseDetector:
         """测试空关键点返回 None"""
         detector = PoseDetector(model_path="mock.pt")
 
-        empty_keypoints = DummyKeypoints(xyn=np.zeros((0, 17, 2)), conf=np.zeros((0, 17)))
+        empty_keypoints = DummyKeypoints(
+            xyn=np.zeros((0, COCO_KEYPOINT_COUNT, 2)),
+            conf=np.zeros((0, COCO_KEYPOINT_COUNT))
+        )
         assert detector._extract_keypoints(empty_keypoints, (100, 100, 3)) is None
 
     def test_extract_keypoints_defaults_conf(self, mock_yolo):
         """测试缺失置信度时填充为 0"""
         detector = PoseDetector(model_path="mock.pt")
 
-        keypoints = DummyKeypointsNoConf(xyn=np.zeros((17, 2), dtype=float))
+        keypoints = DummyKeypointsNoConf(
+            xyn=np.zeros((COCO_KEYPOINT_COUNT, 2), dtype=float)
+        )
         keypoints_xy, keypoints_conf = detector._extract_keypoints(keypoints, (100, 100, 3))
 
-        assert keypoints_xy.shape == (1, 17, 2)
-        assert keypoints_conf.shape == (1, 17)
+        assert keypoints_xy.shape == (1, COCO_KEYPOINT_COUNT, 2)
+        assert keypoints_conf.shape == (1, COCO_KEYPOINT_COUNT)
         assert float(keypoints_conf.sum()) == 0.0
 
     def test_extract_keypoints_reshape_conf(self, mock_yolo):
         """测试一维置信度扩展"""
         detector = PoseDetector(model_path="mock.pt")
 
-        keypoints = DummyKeypoints(xyn=np.zeros((17, 2), dtype=float), conf=np.zeros(17))
+        keypoints = DummyKeypoints(
+            xyn=np.zeros((COCO_KEYPOINT_COUNT, 2), dtype=float),
+            conf=np.zeros(COCO_KEYPOINT_COUNT)
+        )
         keypoints_xy, keypoints_conf = detector._extract_keypoints(keypoints, (100, 100, 3))
 
-        assert keypoints_xy.shape == (1, 17, 2)
-        assert keypoints_conf.shape == (1, 17)
+        assert keypoints_xy.shape == (1, COCO_KEYPOINT_COUNT, 2)
+        assert keypoints_conf.shape == (1, COCO_KEYPOINT_COUNT)
 
     def test_extract_keypoints_from_xy_normalize(self, mock_yolo):
         """测试从 xy 解析并归一化"""
@@ -373,23 +380,24 @@ class TestPoseDetector:
 
         assert detector._select_best_person(np.array([])) == 0
 
-    def test_map_to_mediapipe_handles_missing_points(self, mock_yolo):
-        """测试映射时缺失关键点的处理"""
+    def test_build_landmarks_handles_missing_points(self, mock_yolo):
+        """测试关键点缺失时的填充处理"""
         detector = PoseDetector(model_path="mock.pt")
 
         keypoints_xy = np.array([[0.4, 0.6]], dtype=float)
         keypoints_conf = np.array([0.8], dtype=float)
-        landmarks = detector._map_to_mediapipe(keypoints_xy, keypoints_conf)
+        landmarks = detector._build_landmarks(keypoints_xy, keypoints_conf)
 
         assert landmarks[PoseDetector.NOSE].x == pytest.approx(0.4)
         assert landmarks[PoseDetector.LEFT_EYE].x == 0.0
+        assert len(landmarks) == COCO_KEYPOINT_COUNT
 
-    def test_map_to_mediapipe_yolo_mapping(self, mock_yolo):
-        """测试 YOLO 17→33 关键点映射"""
+    def test_build_landmarks_coco_mapping(self, mock_yolo):
+        """测试 COCO 关键点映射"""
         detector = PoseDetector(model_path="mock.pt")
 
-        keypoints_xy = np.zeros((17, 2), dtype=float)
-        keypoints_conf = np.zeros(17, dtype=float)
+        keypoints_xy = np.zeros((COCO_KEYPOINT_COUNT, 2), dtype=float)
+        keypoints_conf = np.zeros(COCO_KEYPOINT_COUNT, dtype=float)
         keypoints_xy[0] = [0.11, 0.12]
         keypoints_xy[1] = [0.21, 0.22]
         keypoints_xy[2] = [0.31, 0.32]
@@ -397,26 +405,26 @@ class TestPoseDetector:
         keypoints_conf[1] = 0.85
         keypoints_conf[2] = 0.75
 
-        landmarks = detector._map_to_mediapipe(keypoints_xy, keypoints_conf)
+        landmarks = detector._build_landmarks(keypoints_xy, keypoints_conf)
 
         assert landmarks[PoseDetector.NOSE].x == pytest.approx(0.11)
         assert landmarks[PoseDetector.LEFT_EYE].x == pytest.approx(0.21)
         assert landmarks[PoseDetector.RIGHT_EYE].x == pytest.approx(0.31)
         assert landmarks[PoseDetector.RIGHT_EYE].visibility == pytest.approx(0.75)
-        assert landmarks[PoseDetector.LEFT_EYE_INNER].visibility == 0.0
+        assert landmarks[PoseDetector.LEFT_SHOULDER].visibility == 0.0
 
-    def test_map_to_mediapipe_partial_low_confidence(self, mock_yolo):
-        """测试部分关键点低置信度"""
+    def test_build_landmarks_partial_low_confidence(self, mock_yolo):
+        """测试低置信度关键点仍保留"""
         detector = PoseDetector(model_path="mock.pt")
 
-        keypoints_xy = np.zeros((17, 2), dtype=float)
-        keypoints_conf = np.zeros(17, dtype=float)
+        keypoints_xy = np.zeros((COCO_KEYPOINT_COUNT, 2), dtype=float)
+        keypoints_conf = np.zeros(COCO_KEYPOINT_COUNT, dtype=float)
         keypoints_xy[0] = [0.4, 0.4]
         keypoints_xy[5] = [0.6, 0.6]
         keypoints_conf[0] = 0.02
         keypoints_conf[5] = 0.9
 
-        landmarks = detector._map_to_mediapipe(keypoints_xy, keypoints_conf)
+        landmarks = detector._build_landmarks(keypoints_xy, keypoints_conf)
 
         assert landmarks[PoseDetector.NOSE].visibility == pytest.approx(0.02)
         assert landmarks[PoseDetector.LEFT_SHOULDER].visibility == pytest.approx(0.9)
@@ -463,13 +471,15 @@ class TestPoseDetector:
     def test_landmark_constants(self):
         """测试关键点索引常量"""
         assert PoseDetector.NOSE == 0
-        assert PoseDetector.LEFT_SHOULDER == 11
-        assert PoseDetector.RIGHT_SHOULDER == 12
-        assert PoseDetector.LEFT_HIP == 23
-        assert PoseDetector.RIGHT_HIP == 24
-        assert PoseDetector.LEFT_KNEE == 25
-        assert PoseDetector.RIGHT_KNEE == 26
-        assert PoseDetector.LEFT_ANKLE == 27
-        assert PoseDetector.RIGHT_ANKLE == 28
-        assert PoseDetector.LEFT_EAR == 7
-        assert PoseDetector.RIGHT_EAR == 8
+        assert PoseDetector.LEFT_EYE == 1
+        assert PoseDetector.RIGHT_EYE == 2
+        assert PoseDetector.LEFT_EAR == 3
+        assert PoseDetector.RIGHT_EAR == 4
+        assert PoseDetector.LEFT_SHOULDER == 5
+        assert PoseDetector.RIGHT_SHOULDER == 6
+        assert PoseDetector.LEFT_HIP == 11
+        assert PoseDetector.RIGHT_HIP == 12
+        assert PoseDetector.LEFT_KNEE == 13
+        assert PoseDetector.RIGHT_KNEE == 14
+        assert PoseDetector.LEFT_ANKLE == 15
+        assert PoseDetector.RIGHT_ANKLE == 16

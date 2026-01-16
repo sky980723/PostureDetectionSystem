@@ -5,6 +5,7 @@
 """
 
 import pytest
+import json
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,6 +67,7 @@ class TestPostureRecord:
             posture_type="head_forward",
             severity=0.8,
             duration_seconds=30.5,
+            pose_landmarks="[]",
         )
 
         result = record.to_dict()
@@ -75,6 +77,7 @@ class TestPostureRecord:
         assert result["posture_type"] == "head_forward"
         assert result["severity"] == 0.8
         assert result["duration_seconds"] == 30.5
+        assert result["pose_landmarks"] == "[]"
 
     def test_repr(self):
         """测试字符串表示"""
@@ -126,6 +129,38 @@ class TestRecordService:
         )
 
         assert record.timestamp == custom_time
+
+    @pytest.mark.asyncio
+    async def test_create_record_with_pose_landmarks(self, record_service: RecordService):
+        """测试保存关键点 JSON 数据"""
+        pose_landmarks = [
+            {"x": 0.1, "y": 0.2, "z": 0.0, "visibility": 0.9}
+            for _ in range(17)
+        ]
+        record = await record_service.create_record(
+            posture_type="head_forward",
+            severity=0.4,
+            duration_seconds=12.0,
+            pose_landmarks=pose_landmarks,
+        )
+
+        assert record.pose_landmarks is not None
+        decoded = json.loads(record.pose_landmarks)
+        assert len(decoded) == 17
+        assert decoded[0]["x"] == pytest.approx(0.1)
+
+    @pytest.mark.asyncio
+    async def test_create_record_with_pose_landmarks_string(self, record_service: RecordService):
+        """测试使用 JSON 字符串保存关键点"""
+        payload = json.dumps([{"x": 0.2, "y": 0.3, "z": 0.0, "visibility": 0.8}])
+        record = await record_service.create_record(
+            posture_type="hunchback",
+            severity=0.5,
+            duration_seconds=15.0,
+            pose_landmarks=payload,
+        )
+
+        assert record.pose_landmarks == payload
 
     @pytest.mark.asyncio
     async def test_create_record_invalid_posture_type(self, record_service: RecordService):

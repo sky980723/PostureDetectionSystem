@@ -15,6 +15,12 @@
     --color-warning-status: #FFC107;
     --color-bad: #f44336;
 
+    /* 骨架线条颜色 */
+    --pose-color-normal: #00FF00;
+    --pose-color-head-forward: #FFA500;
+    --pose-color-hunchback: #FF6347;
+    --pose-color-crossed-legs: #FF00FF;
+
     /* 中性色 */
     --color-text: #333;
     --color-text-light: #666;

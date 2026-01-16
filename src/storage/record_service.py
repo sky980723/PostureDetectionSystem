@@ -5,7 +5,8 @@
 """
 
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Literal
+import json
+from typing import Dict, List, Any, Literal, Iterable
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +37,7 @@ class RecordService:
         posture_type: str,
         severity: float,
         duration_seconds: float,
+        pose_landmarks: Iterable[Any] | str | None = None,
         timestamp: datetime | None = None,
     ) -> PostureRecord:
         """
@@ -45,6 +47,7 @@ class RecordService:
             posture_type: 姿态类型 (head_forward/hunchback/crossed_legs)
             severity: 严重程度 (0.0-1.0)
             duration_seconds: 持续时间（秒）
+            pose_landmarks: 关键点数据（JSON 字符串或可序列化序列）
             timestamp: 记录时间，如果为 None 则使用当前时间
 
         Returns:
@@ -70,11 +73,14 @@ class RecordService:
                 f"Invalid duration_seconds: {duration_seconds}. Must be non-negative"
             )
 
+        pose_landmarks_json = self._serialize_pose_landmarks(pose_landmarks)
+
         # 创建记录
         record = PostureRecord(
             posture_type=posture_type,
             severity=severity,
             duration_seconds=duration_seconds,
+            pose_landmarks=pose_landmarks_json,
         )
 
         if timestamp is not None:
@@ -86,6 +92,35 @@ class RecordService:
         await self.session.refresh(record)
 
         return record
+
+    @staticmethod
+    def _serialize_pose_landmarks(pose_landmarks: Iterable[Any] | str | None) -> str | None:
+        """
+        序列化关键点数据为 JSON 字符串
+
+        Args:
+            pose_landmarks: 关键点数据
+
+        Returns:
+            JSON 字符串或 None
+        """
+        if pose_landmarks is None:
+            return None
+
+        if isinstance(pose_landmarks, str):
+            return pose_landmarks
+
+        serializable = []
+        for landmark in pose_landmarks:
+            if hasattr(landmark, "to_dict"):
+                serializable.append(landmark.to_dict())
+            else:
+                serializable.append(landmark)
+
+        try:
+            return json.dumps(serializable, ensure_ascii=True)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("pose_landmarks must be JSON serializable") from exc
 
     async def get_records(
         self,

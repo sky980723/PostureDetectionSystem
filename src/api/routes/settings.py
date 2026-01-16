@@ -25,9 +25,9 @@ _current_settings = {
         "enable_popup": api_settings.default_enable_popup
     },
     "detection_thresholds": {
-        "head_forward_angle": detection_settings.head_forward_angle_threshold,
-        "hunchback_offset": detection_settings.hunchback_offset_threshold,
-        "crossed_legs_diff": detection_settings.crossed_legs_x_diff_threshold
+        "head_forward_angle": api_settings.default_head_forward_angle,
+        "hunchback_offset": api_settings.default_hunchback_offset,
+        "crossed_legs_diff": api_settings.default_crossed_legs_diff
     }
 }
 

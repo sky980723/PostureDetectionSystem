@@ -42,17 +42,26 @@ const appState = {
     }
 };
 
-// MediaPipe 33个关键点的连接关系（用于绘制骨架）
+// COCO 17 关键点连接关系（19条，用于绘制骨架）
 const POSE_CONNECTIONS = [
-    [0, 1], [1, 2], [2, 3], [3, 7],
-    [0, 4], [4, 5], [5, 6], [6, 8],
-    [9, 10],
-    [11, 12], [11, 13], [13, 15], [15, 17], [17, 19], [19, 15], [15, 21],
-    [12, 14], [14, 16], [16, 18], [18, 20], [20, 16], [16, 22],
-    [11, 23], [12, 24], [23, 24],
-    [23, 25], [25, 27], [27, 29], [29, 31], [31, 27],
-    [24, 26], [26, 28], [28, 30], [30, 32], [32, 28]
+    // 头部: nose-eyes-ears
+    [0, 1], [0, 2], [1, 2], [1, 3], [2, 4],
+    // 头肩连接
+    [3, 5], [4, 6],
+    // 躯干: shoulders-hips
+    [5, 6], [5, 11], [6, 12], [11, 12],
+    // 上肢: shoulders-elbows-wrists
+    [5, 7], [7, 9], [6, 8], [8, 10],
+    // 下肢: hips-knees-ankles
+    [11, 13], [13, 15], [12, 14], [14, 16]
 ];
+
+const POSE_COLOR_VARS = {
+    normal: '--pose-color-normal',
+    headForward: '--pose-color-head-forward',
+    hunchback: '--pose-color-hunchback',
+    crossedLegs: '--pose-color-crossed-legs'
+};
 
 // ============================================================================
 // DOM元素引用
@@ -297,7 +306,7 @@ function handlePostureResult(message) {
         elements.detectionStatus.textContent = '检测中';
 
         // 绘制关键点和骨架
-        drawPose(pose_landmarks);
+        drawPose(pose_landmarks, analysis);
 
         // 更新状态指示器
         const status = analysis.status || 'good';
@@ -340,12 +349,34 @@ function handlePostureResult(message) {
 // Canvas 绘制
 // ============================================================================
 
-function drawPose(landmarks) {
+function getPoseColor(analysis) {
+    const rootStyle = getComputedStyle(document.documentElement);
+    const issues = Array.isArray(analysis?.issues) ? analysis.issues : [];
+    let colorVar = POSE_COLOR_VARS.normal;
+
+    if (issues.includes('hunchback')) {
+        colorVar = POSE_COLOR_VARS.hunchback;
+    } else if (issues.includes('head_forward')) {
+        colorVar = POSE_COLOR_VARS.headForward;
+    } else if (issues.includes('crossed_legs')) {
+        colorVar = POSE_COLOR_VARS.crossedLegs;
+    }
+
+    return rootStyle.getPropertyValue(colorVar).trim() || '#00FF00';
+}
+
+function drawPose(landmarks, analysis) {
     const ctx = appState.ctx;
     const canvas = appState.canvas;
 
+    if (!Array.isArray(landmarks) || landmarks.length === 0) {
+        return;
+    }
+
+    const poseColor = getPoseColor(analysis);
+
     // 绘制骨架连线
-    ctx.strokeStyle = '#00FF00';
+    ctx.strokeStyle = poseColor;
     ctx.lineWidth = 2;
     ctx.beginPath();
 
@@ -353,7 +384,13 @@ function drawPose(landmarks) {
         const start = landmarks[startIdx];
         const end = landmarks[endIdx];
 
-        if (start && end && start.visibility > 0.5 && end.visibility > 0.5) {
+        if (!start || !end) {
+            continue;
+        }
+
+        const startVisibility = Number.isFinite(start.visibility) ? start.visibility : 0;
+        const endVisibility = Number.isFinite(end.visibility) ? end.visibility : 0;
+        if (startVisibility > 0.5 && endVisibility > 0.5) {
             const startX = start.x * canvas.width;
             const startY = start.y * canvas.height;
             const endX = end.x * canvas.width;
@@ -367,12 +404,17 @@ function drawPose(landmarks) {
 
     // 绘制关键点
     for (const landmark of landmarks) {
-        if (landmark.visibility > 0.5) {
+        if (!landmark) {
+            continue;
+        }
+
+        const visibility = Number.isFinite(landmark.visibility) ? landmark.visibility : 0;
+        if (visibility > 0.5) {
             const x = landmark.x * canvas.width;
             const y = landmark.y * canvas.height;
 
             // 绘制外圈
-            ctx.fillStyle = '#00FF00';
+            ctx.fillStyle = poseColor;
             ctx.beginPath();
             ctx.arc(x, y, 5, 0, 2 * Math.PI);
             ctx.fill();

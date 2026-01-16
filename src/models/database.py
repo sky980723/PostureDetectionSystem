@@ -20,9 +20,21 @@ from sqlalchemy.orm import declarative_base
 # 创建声明式基类
 Base = declarative_base()
 
+# 迁移脚本目录
+MIGRATIONS_DIR = Path(__file__).parent.parent.parent / "migrations"
 # 全局引擎和会话工厂
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
+
+
+def get_migrations_dir() -> Path:
+    """
+    获取迁移脚本目录
+
+    Returns:
+        迁移脚本目录路径
+    """
+    return MIGRATIONS_DIR
 
 
 def get_database_url(db_path: str | None = None) -> str:
