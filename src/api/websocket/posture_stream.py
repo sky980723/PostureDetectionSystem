@@ -317,11 +317,13 @@ class PostureStreamHandler:
         Returns:
             置信度 (0-1)
         """
-        visible_landmarks = [
-            lm for lm in pose_result.landmarks
-            if lm.visibility > 0.5
+        visible_scores = [
+            lm.visibility for lm in pose_result.landmarks
+            if lm.visibility > 0.0
         ]
-        return len(visible_landmarks) / len(pose_result.landmarks)
+        if not visible_scores:
+            return 0.0
+        return sum(visible_scores) / len(visible_scores)
 
     def _create_error_response(self, message: str, code: str) -> ErrorResponse:
         """

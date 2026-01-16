@@ -86,6 +86,16 @@ class PostureResponse(BaseModel):
     status_indicator: Optional[StatusIndicator] = Field(None, description="状态指示器")
     confidence: Optional[float] = Field(None, ge=0.0, le=1.0, description="检测置信度")
 
+    @field_validator('pose_landmarks')
+    @classmethod
+    def validate_pose_landmarks(cls, v):
+        """验证关键点数量"""
+        if v is None:
+            return v
+        if len(v) != 33:
+            raise ValueError("pose_landmarks must contain 33 landmarks")
+        return v
+
 
 class ErrorResponse(BaseModel):
     """错误响应"""

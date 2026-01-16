@@ -1,16 +1,16 @@
 """
 人体姿态检测器模块
 
-封装 MediaPipe Pose 模型,提供简洁的接口用于人体关键点检测
+封装 YOLOv8-Pose 模型,提供简洁的接口用于人体关键点检测
 """
 
-from typing import Optional, List, Dict, Any
-import numpy as np
-import mediapipe as mp
-from mediapipe.tasks import python
-from mediapipe.tasks.python import vision
+from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass
-from pathlib import Path
+import numpy as np
+try:
+    from ultralytics import YOLO
+except ModuleNotFoundError:
+    YOLO = None
 
 from config.settings import settings
 
@@ -90,9 +90,9 @@ class PoseDetector:
     """
     人体姿态检测器
 
-    封装 MediaPipe Pose 模型,提供简洁易用的人体关键点检测功能
+    封装 YOLOv8-Pose 模型,输出 MediaPipe 33 关键点兼容格式
 
-    MediaPipe Pose 关键点索引:
+    MediaPipe 关键点索引:
         0: 鼻子 (nose)
         11-12: 肩膀 (left_shoulder, right_shoulder)
         23-24: 髋部 (left_hip, right_hip)
@@ -136,40 +136,53 @@ class PoseDetector:
     LEFT_FOOT_INDEX = 31
     RIGHT_FOOT_INDEX = 32
 
+    _MEDIAPIPE_KEYPOINT_COUNT = 33
+    _COCO_KEYPOINT_COUNT = 17
+    _MEDIAPIPE_TO_COCO = {
+        NOSE: 0,
+        LEFT_EYE: 1,
+        RIGHT_EYE: 2,
+        LEFT_EAR: 3,
+        RIGHT_EAR: 4,
+        LEFT_SHOULDER: 5,
+        RIGHT_SHOULDER: 6,
+        LEFT_ELBOW: 7,
+        RIGHT_ELBOW: 8,
+        LEFT_WRIST: 9,
+        RIGHT_WRIST: 10,
+        LEFT_HIP: 11,
+        RIGHT_HIP: 12,
+        LEFT_KNEE: 13,
+        RIGHT_KNEE: 14,
+        LEFT_ANKLE: 15,
+        RIGHT_ANKLE: 16
+    }
+
     def __init__(
         self,
-        model_complexity: Optional[int] = None,
-        min_detection_confidence: Optional[float] = None,
-        min_tracking_confidence: Optional[float] = None
+        model_path: Optional[str] = None,
+        imgsz: Optional[int] = None,
+        conf: Optional[float] = None,
+        iou: Optional[float] = None
     ):
         """
         初始化姿态检测器
 
         Args:
-            model_complexity: 模型复杂度 (0=轻量, 1=标准, 2=重量) [注：新版API统一使用lite模型]
-            min_detection_confidence: 最小检测置信度
-            min_tracking_confidence: 最小追踪置信度
+            model_path: YOLOv8-pose 模型路径或名称
+            imgsz: 推理输入尺寸
+            conf: 置信度阈值
+            iou: NMS IoU 阈值
         """
-        self.model_complexity = model_complexity or settings.model_complexity
-        self.min_detection_confidence = (
-            min_detection_confidence or settings.min_detection_confidence
-        )
-        self.min_tracking_confidence = (
-            min_tracking_confidence or settings.min_tracking_confidence
-        )
+        self.model_path = model_path or settings.yolo_model_path
+        self.imgsz = imgsz or settings.yolo_imgsz
+        self.conf = conf or settings.yolo_conf
+        self.iou = iou or settings.yolo_iou
 
-        # 初始化 MediaPipe Pose Landmarker（新版 API）
-        model_path = Path(__file__).parent.parent.parent / "models" / "pose_landmarker_lite.task"
+        if YOLO is None:
+            raise ModuleNotFoundError("ultralytics 未安装, 请先安装 ultralytics")
 
-        base_options = python.BaseOptions(model_asset_path=str(model_path))
-        options = vision.PoseLandmarkerOptions(
-            base_options=base_options,
-            running_mode=vision.RunningMode.IMAGE,
-            min_pose_detection_confidence=self.min_detection_confidence,
-            min_tracking_confidence=self.min_tracking_confidence
-        )
-
-        self.landmarker = vision.PoseLandmarker.create_from_options(options)
+        self.model = YOLO(self.model_path)
 
     def detect(self, image: np.ndarray) -> PoseResult:
         """
@@ -190,59 +203,131 @@ class PoseDetector:
         if len(image.shape) != 3 or image.shape[2] != 3:
             raise ValueError(f"输入图像必须是 3 通道图像, 当前形状: {image.shape}")
 
-        # 转换为 MediaPipe Image 对象
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image)
+        results = self.model.predict(
+            image,
+            imgsz=self.imgsz,
+            conf=self.conf,
+            iou=self.iou,
+            verbose=False
+        )
 
-        # 执行检测
-        detection_result = self.landmarker.detect(mp_image)
-
-        # 解析结果
-        if detection_result.pose_landmarks and len(detection_result.pose_landmarks) > 0:
-            # 取第一个检测到的人体（通常只有一个）
-            landmarks = self._parse_landmarks(detection_result.pose_landmarks[0])
-            return PoseResult(landmarks=landmarks, detected=True)
-        else:
-            # 未检测到人体,返回空的关键点列表
+        if not results:
             return PoseResult(landmarks=[], detected=False)
 
-    def _bgr_to_rgb(self, image: np.ndarray) -> np.ndarray:
+        result = results[0]
+        keypoints = getattr(result, "keypoints", None)
+        parsed = self._extract_keypoints(keypoints, image.shape)
+        if parsed is None:
+            return PoseResult(landmarks=[], detected=False)
+
+        keypoints_xy, keypoints_conf = parsed
+
+        best_index = self._select_best_person(keypoints_conf)
+        keypoints_xy = keypoints_xy[best_index]
+        keypoints_conf = keypoints_conf[best_index]
+
+        landmarks = self._map_to_mediapipe(keypoints_xy, keypoints_conf)
+        return PoseResult(landmarks=landmarks, detected=True)
+
+    def _extract_keypoints(
+        self,
+        keypoints: Any,
+        image_shape: Tuple[int, int, int]
+    ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         """
-        将 BGR 图像转换为 RGB 格式
+        解析 YOLO 关键点数据
 
         Args:
-            image: BGR 格式图像
+            keypoints: YOLO 输出关键点
+            image_shape: 输入图像形状
 
         Returns:
-            RGB 格式图像
+            (keypoints_xy, keypoints_conf) 或 None
         """
-        # MediaPipe 需要 RGB 格式且图像不可写
-        return np.ascontiguousarray(image[:, :, ::-1])
+        if keypoints is None:
+            return None
 
-    def _parse_landmarks(self, mediapipe_landmarks: Any) -> List[Landmark]:
-        """
-        解析 MediaPipe 关键点数据
+        xy = None
+        normalized = False
 
-        Args:
-            mediapipe_landmarks: MediaPipe 原始关键点列表
+        if hasattr(keypoints, "xyn") and keypoints.xyn is not None:
+            xy = self._to_numpy(keypoints.xyn)
+            normalized = True
+        elif hasattr(keypoints, "xy") and keypoints.xy is not None:
+            xy = self._to_numpy(keypoints.xy)
+        elif hasattr(keypoints, "data") and keypoints.data is not None:
+            data = self._to_numpy(keypoints.data)
+            if data is not None and data.shape[-1] >= 2:
+                xy = data[..., :2]
 
-        Returns:
-            标准化的 Landmark 对象列表
-        """
-        landmarks = []
-        for lm in mediapipe_landmarks:
-            landmark = Landmark(
-                x=lm.x,
-                y=lm.y,
-                z=lm.z,
-                visibility=lm.visibility
+        if xy is None or xy.size == 0:
+            return None
+
+        conf = None
+        if hasattr(keypoints, "conf") and keypoints.conf is not None:
+            conf = self._to_numpy(keypoints.conf)
+        elif hasattr(keypoints, "data") and keypoints.data is not None:
+            data = self._to_numpy(keypoints.data)
+            if data is not None and data.shape[-1] >= 3:
+                conf = data[..., 2]
+
+        if xy.ndim == 2:
+            xy = xy[None, ...]
+
+        if conf is None:
+            conf = np.zeros((xy.shape[0], xy.shape[1]), dtype=float)
+        elif conf.ndim == 1:
+            conf = conf[None, ...]
+
+        if not normalized:
+            height, width = image_shape[:2]
+            if width > 0 and height > 0:
+                xy = xy / np.array([width, height])
+
+        return xy.astype(float), conf.astype(float)
+
+    def _to_numpy(self, value: Any) -> Optional[np.ndarray]:
+        if value is None:
+            return None
+        if hasattr(value, "cpu"):
+            return value.cpu().numpy()
+        return np.asarray(value)
+
+    def _select_best_person(self, keypoints_conf: np.ndarray) -> int:
+        if keypoints_conf.size == 0:
+            return 0
+        scores = keypoints_conf.mean(axis=1)
+        return int(np.argmax(scores))
+
+    def _map_to_mediapipe(
+        self,
+        keypoints_xy: np.ndarray,
+        keypoints_conf: np.ndarray
+    ) -> List[Landmark]:
+        landmarks = [
+            Landmark(x=0.0, y=0.0, z=0.0, visibility=0.0)
+            for _ in range(self._MEDIAPIPE_KEYPOINT_COUNT)
+        ]
+
+        for mediapipe_index, coco_index in self._MEDIAPIPE_TO_COCO.items():
+            if coco_index >= keypoints_xy.shape[0]:
+                continue
+            x, y = keypoints_xy[coco_index]
+            visibility = 0.0
+            if coco_index < keypoints_conf.shape[0]:
+                visibility = float(keypoints_conf[coco_index])
+            landmarks[mediapipe_index] = Landmark(
+                x=float(x),
+                y=float(y),
+                z=0.0,
+                visibility=visibility
             )
-            landmarks.append(landmark)
+
         return landmarks
 
     def close(self):
         """释放资源"""
-        if hasattr(self, 'landmarker'):
-            self.landmarker.close()
+        self.model = None
 
     def __enter__(self):
         """上下文管理器入口"""

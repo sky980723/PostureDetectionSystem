@@ -267,8 +267,9 @@ class TestRecordService:
         stats = await record_service.get_statistics(period="day")
 
         assert stats["total_records"] == 3
-        assert stats["posture_distribution"]["head_forward"] == 2
-        assert stats["posture_distribution"]["hunchback"] == 1
+        assert stats["posture_distribution"]["good"] == 0
+        assert stats["posture_distribution"]["warning"] == 1
+        assert stats["posture_distribution"]["bad"] == 2
         assert stats["avg_severity"] == pytest.approx((0.8 + 0.6 + 0.7) / 3, rel=0.01)
         assert stats["total_duration"] == pytest.approx(75.0, rel=0.01)
 

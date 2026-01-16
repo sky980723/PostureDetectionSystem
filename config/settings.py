@@ -38,6 +38,32 @@ class PostureDetectionSettings(BaseSettings):
         description="最小追踪置信度阈值"
     )
 
+    # YOLOv8-Pose 配置
+    yolo_model_path: str = Field(
+        default="yolov8n-pose.pt",
+        description="YOLOv8-pose 模型路径或名称"
+    )
+
+    yolo_imgsz: int = Field(
+        default=640,
+        ge=1,
+        description="YOLO 推理输入尺寸"
+    )
+
+    yolo_conf: float = Field(
+        default=0.25,
+        ge=0.0,
+        le=1.0,
+        description="YOLO 置信度阈值"
+    )
+
+    yolo_iou: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="YOLO NMS IoU 阈值"
+    )
+
     # 头部前倾检测配置
     head_forward_angle_threshold: float = Field(
         default=15.0,

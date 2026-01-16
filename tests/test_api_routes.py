@@ -65,14 +65,14 @@ def mock_record_service():
     service.get_statistics = AsyncMock(return_value={
         'total_records': 10,
         'posture_distribution': {
-            'head_forward': 5,
-            'hunchback': 3,
-            'crossed_legs': 2
+            'good': 2,
+            'warning': 5,
+            'bad': 3
         },
         'avg_severity': 0.65,
         'total_duration': 300.0,
-        'period_start': datetime.now() - timedelta(days=1),
-        'period_end': datetime.now()
+        'period_start': (datetime.now() - timedelta(days=1)).isoformat(),
+        'period_end': datetime.now().isoformat()
     })
 
     return service
@@ -186,9 +186,9 @@ async def test_get_statistics_week(client, mock_record_service):
         assert response.status_code == 200
         data = response.json()
         assert data["posture_distribution"] == {
-            'head_forward': 5,
-            'hunchback': 3,
-            'crossed_legs': 2
+            'good': 2,
+            'warning': 5,
+            'bad': 3
         }
 
 

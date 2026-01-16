@@ -8,6 +8,7 @@ import pytest
 import json
 import base64
 from unittest.mock import Mock, patch, AsyncMock
+from pydantic import ValidationError
 from fastapi.testclient import TestClient
 from fastapi.websockets import WebSocket
 import numpy as np
@@ -15,7 +16,7 @@ from PIL import Image
 from io import BytesIO
 
 from src.api.main import app
-from src.api.deps import get_pose_detector, get_posture_analyzer, get_alert_manager
+from src.api.deps import get_pose_detector, get_posture_analyzer, get_alert_manager, get_db_session
 from src.detectors.pose_detector import PoseResult, Landmark
 from src.analyzers.posture_analyzer import PostureAnalysisResult
 
@@ -35,15 +36,20 @@ def create_test_image_base64() -> str:
     return f"data:image/jpeg;base64,{img_base64}"
 
 
-def create_mock_pose_result(detected=True) -> PoseResult:
+def create_mock_pose_result(detected=True, visibilities=None) -> PoseResult:
     """创建模拟的姿态检测结果"""
     if not detected:
         return PoseResult(landmarks=[], detected=False)
 
+    if visibilities is None:
+        visibilities = [0.9 for _ in range(33)]
+    elif len(visibilities) != 33:
+        raise ValueError("visibilities must contain 33 values")
+
     # 创建 33 个模拟关键点
     landmarks = [
-        Landmark(x=0.5, y=0.5, z=0.0, visibility=0.9)
-        for _ in range(33)
+        Landmark(x=0.5, y=0.5, z=0.0, visibility=visibility)
+        for visibility in visibilities
     ]
     return PoseResult(landmarks=landmarks, detected=True)
 
@@ -70,6 +76,23 @@ def create_mock_analysis_result(has_issues=False) -> PostureAnalysisResult:
             crossed_legs_diff=None,
             valid=True
         )
+
+
+class DummySession:
+    """模拟数据库会话"""
+    def add(self, record):
+        return None
+
+    async def commit(self):
+        return None
+
+    async def refresh(self, record):
+        return None
+
+
+async def override_get_db_session():
+    """覆盖数据库会话依赖"""
+    yield DummySession()
 
 
 # ============================================================================
@@ -114,6 +137,7 @@ def client(mock_pose_detector, mock_posture_analyzer, mock_alert_manager):
     app.dependency_overrides[get_pose_detector] = lambda: mock_pose_detector
     app.dependency_overrides[get_posture_analyzer] = lambda: mock_posture_analyzer
     app.dependency_overrides[get_alert_manager] = lambda: mock_alert_manager
+    app.dependency_overrides[get_db_session] = override_get_db_session
 
     client = TestClient(app)
     yield client
@@ -194,6 +218,29 @@ async def test_websocket_posture_detection_success(client, mock_pose_detector, m
         assert response["pose_landmarks"] is not None
         assert len(response["pose_landmarks"]) == 33
         assert response["analysis"] is not None
+
+
+@pytest.mark.asyncio
+async def test_websocket_confidence_ignores_zero_visibility(client, mock_pose_detector, mock_posture_analyzer):
+    """测试置信度忽略 visibility 为 0 的关键点"""
+    visibilities = [0.2] * 5 + [0.8] * 5 + [0.0] * 23
+    mock_pose_detector.detect.return_value = create_mock_pose_result(
+        detected=True,
+        visibilities=visibilities
+    )
+    mock_posture_analyzer.analyze.return_value = create_mock_analysis_result(has_issues=False)
+
+    with client.websocket_connect("/ws/posture") as websocket:
+        test_data = {
+            "type": "video_frame",
+            "data": create_test_image_base64(),
+            "timestamp": 1234567890.123
+        }
+        websocket.send_json(test_data)
+
+        response = websocket.receive_json()
+
+        assert response["confidence"] == pytest.approx(0.5)
 
 
 @pytest.mark.asyncio
@@ -340,6 +387,14 @@ def test_video_frame_schema_validation():
             timestamp=1234567890.123
         )
 
+    # 无效数据：Data URL 前缀错误
+    with pytest.raises(ValueError):
+        VideoFrameRequest(
+            type="video_frame",
+            data="data:text/plain;base64,AAAAAA",
+            timestamp=1234567890.123
+        )
+
 
 def test_posture_response_schema():
     """测试姿态响应数据结构"""
@@ -362,6 +417,21 @@ def test_posture_response_schema():
     assert response.detected is True
     assert len(response.pose_landmarks) == 33
     assert response.confidence == 0.95
+
+    # 无效数据：关键点数量不为 33
+    with pytest.raises(ValidationError):
+        PostureResponse(
+            timestamp="2026-01-14T12:00:00",
+            detected=True,
+            pose_landmarks=[
+                LandmarkSchema(x=0.5, y=0.5, z=0.0, visibility=0.9)
+                for _ in range(32)
+            ],
+            analysis=None,
+            alert=None,
+            status_indicator=None,
+            confidence=0.95
+        )
 
 
 # ============================================================================
